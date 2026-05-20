@@ -32,7 +32,10 @@ app.use(express.urlencoded({ extended: true }))
 app.use(express.json())
 
 app.get('/health', (req: Request, res: Response) => {
-    res.status(200).json({ status: 'ok' });
+    res.status(200).json({
+        status: 'ok',
+        database: req.app.locals.databaseStatus || 'unknown',
+    });
 })
 
 app.get('/', (req: Request, res: Response) => {
