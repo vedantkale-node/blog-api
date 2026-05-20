@@ -1,18 +1,14 @@
-import { ConnectOptions, connect } from 'mongoose';
-
-const mongodUri = process.env.MONGOURI || '';
+import { connect } from 'mongoose';
 
 const connectDB = async () => {
-    try {
-        await connect(mongodUri, {
-            useUnifiedTopology: true,
-            useNewUrlParser: true,
-          } as ConnectOptions)
-          console.log('mongoose connected!')
-    } catch (error) {
-        console.log(error.message);
-        throw error;
+    const mongoUri = process.env.MONGO_URI || process.env.MONGOURI;
+
+    if (!mongoUri) {
+        throw new Error('MongoDB connection string is missing. Set MONGO_URI in your .env file.');
     }
+
+    await connect(mongoUri);
+    console.log('mongoose connected!')
 }
 
 export default connectDB;

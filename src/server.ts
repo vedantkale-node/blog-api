@@ -1,5 +1,12 @@
 import app from './app.js';
+import connectDB from './config/database.js';
 
-const port = 5000 || process.env.PORT;
+const port = process.env.PORT || 5000;
 
-app.listen(port, () => console.log(`Server running on port ${port}`));
+try {
+    await connectDB();
+    app.listen(port, () => console.log(`Server running on port ${port}`));
+} catch (error) {
+    console.error(error instanceof Error ? error.message : error);
+    process.exit(1);
+}
