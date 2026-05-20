@@ -4,21 +4,26 @@ import { IUser } from "../interfaces/UserInterface.js";
 const userSchema = new Schema<IUser>({
     firstName: {
         type: String,
-        required: true
+        required: true,
+        trim: true
     },
     lastName: {
         type: String,
-        required: true
+        required: true,
+        trim: true
     },
     username: {
         type: String,
         unique: true,
-        required: [true, 'Username is Required!']
+        required: [true, 'Username is Required!'],
+        trim: true
     },
     email: {
         type: String,
         unique: true,
-        required: [true, "Email is Required!"]
+        required: [true, "Email is Required!"],
+        lowercase: true,
+        trim: true
     },
     password: {
         type: String,

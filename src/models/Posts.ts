@@ -5,10 +5,12 @@ const postSchema = new Schema<IPost>({
   title: {
     type: String,
     required: true,
+    trim: true,
   },
   content: {
     type: String,
     required: true,
+    trim: true,
   },
   author: {
     type: String,
@@ -38,9 +40,11 @@ const postSchema = new Schema<IPost>({
   },
   likes: {
     type: Number,
+    default: 0,
   },
   likedBy: {
-    type: [String]
+    type: [String],
+    default: [],
   },
   comments: [
     {

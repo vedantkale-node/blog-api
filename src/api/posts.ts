@@ -20,7 +20,7 @@ const checkAuth = (req: Request, res: Response, next: NextFunction) => {
   if (req.session && req.session.user) {
     return next();
   } else {
-    return res.status(400).json({ message: "Please log in to continue" });
+    return res.status(401).json({ message: "Please log in to continue" });
   }
 };
 

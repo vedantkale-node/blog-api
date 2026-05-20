@@ -3,21 +3,22 @@ import User from '../models/Users.js';
 import mongoose from 'mongoose';
 import { Request, Response } from 'express';
 
-let session;
-const ObjectId = mongoose.Types.ObjectId;
+const publicUserFields = {
+  loginAttempts: 0,
+  password: 0,
+  createdAt: 0,
+  updatedAt: 0,
+  role: 0,
+  email: 0,
+  __v: 0,
+};
 
 const getUserControl = async (req: Request, res: Response) => {
   try {
     const allUsers = await User.find(
       {},
       {
-        loginAttempts: 0,
-        password: 0,
-        createdAt: 0,
-        updatedAt: 0,
-        role: 0,
-        email: 0,
-        __v: 0,
+        ...publicUserFields,
       }
     );
     if (allUsers.length === 0) {
@@ -31,15 +32,21 @@ const getUserControl = async (req: Request, res: Response) => {
 };
 
 const createUserControl = async (req: Request, res: Response) => {
-  if (!req.body) {
-    return res.status(400).send('fields are missing.');
-  }
   const { firstName, lastName, email, password, username } = req.body;
+
+  if (!firstName || !lastName || !email || !password || !username) {
+    return res.status(400).json({ message: "firstName, lastName, email, username and password are required" });
+  }
+
+  if (password.length < 8 || password.length > 128) {
+    return res.status(400).json({ message: "Password must be between 8 and 128 characters" });
+  }
+
   const newUser = new User({
-    firstName,
-    lastName,
-    username,
-    email,
+    firstName: firstName.trim(),
+    lastName: lastName.trim(),
+    username: username.trim(),
+    email: email.trim().toLowerCase(),
     password,
   });
   try {
@@ -47,11 +54,11 @@ const createUserControl = async (req: Request, res: Response) => {
     newUser.password = hashedPassword;
     await newUser.save();
     res
-      .status(200)
-      .json({ message: `user ${newUser.firstName} has been created.` });
+      .status(201)
+      .json({ message: `User ${newUser.username} has been created.` });
   } catch (err) {
-    if (err.code === 11000 && err.keyPattern.email) {
-      return res.status(400).json({ message: "Email already exists" });
+    if (err.code === 11000) {
+      return res.status(409).json({ message: "Email or username already exists" });
     }
     console.log(err.message);
     res.status(500).json({ message: "Internal server error" });
@@ -60,17 +67,15 @@ const createUserControl = async (req: Request, res: Response) => {
 
 const getOneUserControl = async (req: Request, res: Response) => {
   const { id } = req.params;
+  if (!mongoose.isValidObjectId(id)) {
+    return res.status(400).json({ message: "Invalid user ID" });
+  }
+
   try {
     const oneUser = await User.findOne(
-      { _id: new ObjectId(id) },
+      { _id: id },
       {
-        password: 0,
-        loginAttempts: 0,
-        createdAt: 0,
-        updatedAt: 0,
-        email: 0,
-        __v: 0,
-        role: 0,
+        ...publicUserFields,
       }
     );
     if (!oneUser) {
@@ -79,18 +84,40 @@ const getOneUserControl = async (req: Request, res: Response) => {
     res.status(200).json(oneUser);
   } catch (err) {
     console.log(err.message);
-    res.status(500).json({ message: "Invalid ID" });
+    res.status(500).json({ message: "Internal server error" });
   }
 };
 
 const editUserControl = async (req: Request, res: Response) => {
   const { firstName, lastName } = req.body;
   const { id } = req.params;
+
+  if (!mongoose.isValidObjectId(id)) {
+    return res.status(400).json({ message: "Invalid user ID" });
+  }
+
+  if (req.session.role !== "admin" && req.session.userID != id) {
+    return res.status(403).json({ message: "Forbidden!" });
+  }
+
+  if (!firstName && !lastName) {
+    return res.status(400).json({ message: "Provide firstName or lastName to update" });
+  }
+
+  const updates: { firstName?: string; lastName?: string; updatedAt: Date } = {
+    updatedAt: new Date(),
+  };
+
+  if (firstName) {
+    updates.firstName = firstName.trim();
+  }
+
+  if (lastName) {
+    updates.lastName = lastName.trim();
+  }
+
   try {
-    const updateOneUser = await User.findByIdAndUpdate(id, {
-      firstName,
-      lastName,
-    });
+    const updateOneUser = await User.findByIdAndUpdate(id, updates);
     if (!updateOneUser) {
       return res.status(404).json({ message: "User not found!" });
     }
@@ -105,9 +132,16 @@ const editUserControl = async (req: Request, res: Response) => {
 
 const deleteUserControl = async (req: Request, res: Response) => {
   const { id } = req.params;
+  if (!mongoose.isValidObjectId(id)) {
+    return res.status(400).json({ message: "Invalid user ID" });
+  }
+
   try {
     if (req.session.role === "admin" || req.session.userID == id) {
-      await User.findByIdAndDelete(id);
+      const deletedUser = await User.findByIdAndDelete(id);
+      if (!deletedUser) {
+        return res.status(404).json({ message: "User not found!" });
+      }
       req.session.destroy((err) => {
         if (err) {
           console.log('unable to log out');          
@@ -128,8 +162,8 @@ const deleteUserControl = async (req: Request, res: Response) => {
 const auth = async (req: Request, res: Response) => {
   const { username, password } = req.body;
   try {
-    if (username != "" && password != "") {
-      const findUser = await User.findOne({ username });
+    if (username && password) {
+      const findUser = await User.findOne({ username: username.trim() });
       if (!findUser) {
         return res
           .status(400)
@@ -147,18 +181,17 @@ const auth = async (req: Request, res: Response) => {
         await findUser.save();
         return res.status(400).json({ message: "Wrong username or password!" });
       }
-      session = req.session;
-      session.userID = findUser._id;
-      session.role = findUser.role;
-      session.user = findUser.username;
-      session.fullName = findUser.firstName + " " + findUser.lastName;
+      req.session.userID = findUser._id.toString();
+      req.session.role = findUser.role;
+      req.session.user = findUser.username;
+      req.session.fullName = findUser.firstName + " " + findUser.lastName;
       findUser.loginAttempts = 0;
       await findUser.save();
       return res
         .status(200)
-        .json({ message: `Logged in successfull, Hello ${findUser.username}` });
+        .json({ message: `Logged in successfully. Hello ${findUser.username}` });
     } else {
-      res.status(403).json({ message: "Please fill all fields" });
+      res.status(400).json({ message: "Username and password are required" });
     }
   } catch (err) {
     console.log(err.message);
