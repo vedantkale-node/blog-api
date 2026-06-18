@@ -1,58 +1,70 @@
-import { Schema, model } from "mongoose";
-import { IUser } from "../interfaces/UserInterface.js";
+import bcrypt from 'bcrypt';
+import { Schema, model } from 'mongoose';
+import { IUser } from '../interfaces/UserInterface.js';
 
-const userSchema = new Schema<IUser>({
+const userSchema = new Schema<IUser>(
+  {
     firstName: {
-        type: String,
-        required: true,
-        trim: true
+      type: String,
+      required: true,
+      trim: true,
+      maxlength: 50,
     },
     lastName: {
-        type: String,
-        required: true,
-        trim: true
+      type: String,
+      required: true,
+      trim: true,
+      maxlength: 50,
     },
     username: {
-        type: String,
-        unique: true,
-        required: [true, 'Username is Required!'],
-        trim: true
+      type: String,
+      unique: true,
+      required: [true, 'Username is required'],
+      trim: true,
+      minlength: 3,
+      maxlength: 30,
     },
     email: {
-        type: String,
-        unique: true,
-        required: [true, "Email is Required!"],
-        lowercase: true,
-        trim: true
+      type: String,
+      unique: true,
+      required: [true, 'Email is required'],
+      lowercase: true,
+      trim: true,
     },
     password: {
-        type: String,
-        required: [true, "Password is Required!"],
-        min: 8,
-        max: 128
+      type: String,
+      required: [true, 'Password is required'],
+      minlength: 8,
+      maxlength: 128,
+      select: false,
     },
     role: {
-        type: String,
-        enum: ['user', 'admin'], default: 'user'
+      type: String,
+      enum: ['user', 'admin'],
+      default: 'user',
     },
     loginAttempts: {
-        type: Number,
-        default: 0
+      type: Number,
+      default: 0,
     },
-    createdAt: {
-        type: Date,
-        default: Date.now()
-    },
-    updatedAt: {
-        type: Date,
-        default: Date.now()
-    }
-}); 
+  },
+  {
+    timestamps: true,
+  }
+);
 
-userSchema.pre<IUser>('save', function (next) {
-    this.updatedAt = new Date();
-    next();
+userSchema.pre<IUser>('save', async function (next) {
+  if (!this.isModified('password')) {
+    return next();
+  }
+
+  this.password = await bcrypt.hash(this.password, 12);
+  next();
 });
+
+userSchema.methods.comparePassword = async function (candidate: string) {
+  return bcrypt.compare(candidate, this.password);
+};
 
 const User = model<IUser>('User', userSchema);
 
