@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Session-authenticated REST API for a publishing platform built with Node.js, Express, TypeScript, and MongoDB.">
     <title>Blog API</title>
     <link rel="stylesheet" href="stylesheets/style.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -13,44 +14,48 @@
     <main class="shell">
         <nav class="topbar" aria-label="Primary navigation">
             <a class="brand" href="/">Blog API</a>
-            <a class="status-link" href="/health">Health</a>
+            <div class="topbar-links">
+                <a class="status-link" href="/health">Health</a>
+                <a class="status-link" href="/api/docs">API Docs</a>
+            </div>
         </nav>
 
         <section class="hero">
             <p class="eyebrow">Node.js · Express · TypeScript · MongoDB</p>
-            <h1>Session-authenticated REST API for a publishing platform.</h1>
+            <h1>Production-style REST API for a publishing platform.</h1>
             <p class="intro">
-                A compact backend project with users, admin-only post management, comments, likes, view counts, and MongoDB persistence.
+                A portfolio-ready backend with versioned routes, session authentication, role-based authorization,
+                Zod validation, security middleware, and a consistent JSON response contract.
             </p>
         </section>
 
         <section class="grid" aria-label="API highlights">
             <article>
-                <span>Auth</span>
-                <h2>Session login</h2>
-                <p>Users sign in with bcrypt-protected passwords and receive session-based access.</p>
+                <span>Security</span>
+                <h2>Defense in depth</h2>
+                <p>Helmet headers, CORS, rate limiting, bcrypt hashing, and sanitized error responses.</p>
             </article>
             <article>
-                <span>Posts</span>
-                <h2>Admin workflow</h2>
-                <p>Admins can create, update, and delete published posts with tag support.</p>
+                <span>Architecture</span>
+                <h2>Layered design</h2>
+                <p>Routes, controllers, validators, models, and middleware are separated for clarity and testing.</p>
             </article>
             <article>
-                <span>Social</span>
-                <h2>Comments and likes</h2>
-                <p>Authenticated users can comment, edit their own comments, and toggle likes.</p>
+                <span>Features</span>
+                <h2>Publishing workflow</h2>
+                <p>Admin post management, public reads, comments, likes, view counts, and pagination.</p>
             </article>
         </section>
 
-        <section class="routes" aria-label="Common routes">
+        <section class="routes" aria-label="Core routes">
             <h2>Core Routes</h2>
             <ul>
-                <li><code>POST /user</code><span>Register user</span></li>
-                <li><code>POST /user/auth</code><span>Log in</span></li>
-                <li><code>GET /post</code><span>List posts</span></li>
-                <li><code>POST /post</code><span>Create post as admin</span></li>
-                <li><code>POST /post/:id/comments</code><span>Create comment</span></li>
-                <li><code>PUT /post/:id/like</code><span>Toggle like</span></li>
+                <li><code>POST /api/v1/users/register</code><span>Register user</span></li>
+                <li><code>POST /api/v1/users/login</code><span>Log in</span></li>
+                <li><code>GET /api/v1/users/me</code><span>Current session</span></li>
+                <li><code>GET /api/v1/posts</code><span>List posts</span></li>
+                <li><code>POST /api/v1/posts</code><span>Create post (admin)</span></li>
+                <li><code>POST /api/v1/posts/:id/comments</code><span>Add comment</span></li>
             </ul>
         </section>
     </main>

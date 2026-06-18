@@ -57,6 +57,11 @@ a {
     font-weight: 700;
 }
 
+.topbar-links {
+    display: flex;
+    gap: 10px;
+}
+
 .hero {
     padding: 72px 0 44px;
 }
