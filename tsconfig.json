@@ -13,7 +13,8 @@
     "allowSyntheticDefaultImports": true,
     "useUnknownInCatchVariables": false,
     "esModuleInterop": true,
-    "removeComments": false    
+    "removeComments": false
   },
   "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
 }
