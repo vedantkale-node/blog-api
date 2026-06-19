@@ -1,309 +1,291 @@
 import { Request, Response } from 'express';
 import mongoose from 'mongoose';
 import Post from '../models/Posts.js';
+import { asyncHandler } from '../middleware/asyncHandler.js';
+import { AppError } from '../utils/AppError.js';
+import { sendSuccess } from '../utils/apiResponse.js';
+import {
+  createCommentSchema,
+  createPostSchema,
+  paginationSchema,
+  updateCommentSchema,
+  updatePostSchema,
+} from '../validators/post.validator.js';
 
-const parseTags = (tags: string | string[] = []) => {
-  if (Array.isArray(tags)) {
-    return tags.map((tag) => tag.trim()).filter(Boolean);
-  }
-
-  return tags.split(",").map((tag) => tag.trim()).filter(Boolean);
+const publicPostProjection = {
+  title: 1,
+  content: 1,
+  author: 1,
+  tags: 1,
+  publishedAt: 1,
+  views: 1,
+  likes: 1,
+  comments: 1,
 };
 
-const isAdmin = (req: Request) => req.session.role === "admin";
+export const getPosts = asyncHandler(async (req: Request, res: Response) => {
+  const { page, limit } = paginationSchema.parse(req.query);
+  const skip = (page - 1) * limit;
 
-const getAllPost = async (req: Request, res: Response) => {
-  try {
-    const allPost = await Post.find(
-      { isPublished: true },
-      {
-        updatedAt: 0,
-        createdAt: 0,
-        isPublished: 0,
-      }
-    );
-    res.status(200).json(allPost);
-  } catch (err) {
-    console.log(err.message);
-    res.status(500).json({ message: "Internal server error!" });
-  }
-};
+  const filter = { isPublished: true };
 
-const getOnePost = async (req: Request, res: Response) => {
-  const _id = req.params.post;
-  if (!mongoose.isValidObjectId(_id)) {
-    return res.status(400).json({ message: "Invalid post ID" });
-  }
+  const [posts, total] = await Promise.all([
+    Post.find(filter, publicPostProjection)
+      .sort({ publishedAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+    Post.countDocuments(filter),
+  ]);
 
-  try {
-    await Post.updateOne({ _id }, { $inc: { views: 1 } }); //updating views key whenever the route is fetched
-    const getPost = await Post.findById(_id);
-    if (!getPost) {
-      return res.status(404).json({ message: "Post not found!" });
-    }
-    res.status(200).json(getPost);
-  } catch (err) {
-    console.log(err.message);
-    res.status(404).json({ message: "Post Not Found!" });
-  }
-};
+  sendSuccess({
+    res,
+    data: {
+      posts,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    },
+  });
+});
 
-const createPost = async (req: Request, res: Response) => {
-  const { title, content, tags } = req.body;
+export const getPostById = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
 
-  if (!isAdmin(req)) {
-    return res.status(403).json({ message: "Forbidden!" });
+  if (!mongoose.isValidObjectId(id)) {
+    throw new AppError('Invalid post ID', 400);
   }
 
-  if (!title || !content || !tags) {
-    return res.status(400).json({ message: "title, content and tags are required" });
+  const post = await Post.findOneAndUpdate(
+    { _id: id, isPublished: true },
+    { $inc: { views: 1 } },
+    { new: true, projection: publicPostProjection }
+  ).lean();
+
+  if (!post) {
+    throw new AppError('Post not found', 404);
   }
 
-  const newPost = new Post({
-    title: title.trim(),
-    content: content.trim(),
+  sendSuccess({ res, data: post });
+});
+
+export const createPost = asyncHandler(async (req: Request, res: Response) => {
+  const payload = createPostSchema.parse(req.body);
+
+  const post = await Post.create({
+    ...payload,
     author: req.session.fullName,
-    tags: parseTags(tags),
     publishedAt: new Date(),
     isPublished: true,
   });
 
-  try {
-    const savePost = await newPost.save();
-    return res.status(201).json(savePost);
-  } catch (err) {
-    console.log(err.message);
-    return res.status(500).json({ message: "Internal server error!" });
-  }
-};
+  sendSuccess({
+    res,
+    statusCode: 201,
+    message: 'Post created successfully',
+    data: post,
+  });
+});
 
-const editPost = async (req: Request, res: Response) => {
-  const id = req.params.post;
-  const { title, content, tags } = req.body;
+export const updatePost = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const updates = updatePostSchema.parse(req.body);
 
   if (!mongoose.isValidObjectId(id)) {
-    return res.status(400).json({ message: "Invalid post ID" });
+    throw new AppError('Invalid post ID', 400);
   }
 
-  try {
-    if (isAdmin(req)) {
-      const updates: { title?: string; content?: string; tags?: string[]; updatedAt: Date } = {
-        updatedAt: new Date(),
-      };
+  const post = await Post.findByIdAndUpdate(id, updates, {
+    new: true,
+    runValidators: true,
+    projection: publicPostProjection,
+  }).lean();
 
-      if (title) {
-        updates.title = title.trim();
-      }
-
-      if (content) {
-        updates.content = content.trim();
-      }
-
-      if (tags) {
-        updates.tags = parseTags(tags);
-      }
-
-      const myPost = await Post.findByIdAndUpdate(id, updates, { new: true });
-      if (!myPost) {
-        return res.status(404).json({ message: "The post not found!" });
-      }
-      return res
-        .status(200)
-        .json({ message: "The changes has been made to the post" });
-    }
-    return res.status(403).json({ message: "Forbidden!" });
-  } catch (err) {
-    console.log(err.message);
-    res.status(500).json({ message: "Internal server error!" });
+  if (!post) {
+    throw new AppError('Post not found', 404);
   }
-};
 
-const deletePost = async (req: Request, res: Response) => {
-  const id = req.params.post;
+  sendSuccess({
+    res,
+    message: 'Post updated successfully',
+    data: post,
+  });
+});
+
+export const deletePost = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+
   if (!mongoose.isValidObjectId(id)) {
-    return res.status(400).json({ message: "Invalid post ID" });
+    throw new AppError('Invalid post ID', 400);
   }
 
-  try {
-    if (isAdmin(req)) {
-      const deletedPost = await Post.findByIdAndDelete(id);
-      if (!deletedPost) {
-        return res.status(404).json({ message: "Post not found!" });
-      }
-      return res.status(200).json({ message: "Post has been deleted" });
-    }
-    res.status(403).json({ message: "Forbidden" });
-  } catch (err) {
-    console.log(err.message);
-    res.status(500).json({ message: "Internal server error!" });
-  }
-};
+  const post = await Post.findByIdAndDelete(id);
 
-const likePost = async (req: Request, res: Response) => {
-  const postId = req.params.post;
-  const { userID } = req.session;
-  if (!mongoose.isValidObjectId(postId)) {
-    return res.status(400).json({ message: "Invalid post ID" });
+  if (!post) {
+    throw new AppError('Post not found', 404);
   }
 
-  try {
-    const myPost = await Post.findById(postId);
-    if (!myPost) {
-      return res.status(404).json({ message: "Post not found" });
-    }
-    if (!userID) {
-      return res.status(401).json({ error: "Unauthorized" });
-    }
-    const alreadyLiked = myPost.likedBy.includes(userID);
-    if (alreadyLiked) {
-      const index = myPost.likedBy.indexOf(userID);
-      myPost.likedBy.splice(index, 1);
-      myPost.likes--;
-    } else {
-      myPost.likedBy.push(userID);
-      myPost.likes++;
-    }
-    await myPost.save();
-    return res.status(200).json(myPost);
-  } catch (err) {
-    console.log(err.message);
-    res.status(500).json({ message: "Internal server error!" });
-  }
-};
+  sendSuccess({ res, message: 'Post deleted successfully' });
+});
 
-const createPostComment = async (req: Request, res: Response) => {
-  const _id = req.params.post;
-  const { text } = req.body;
-  const { userID, role, user } = req.session;
-  if (!mongoose.isValidObjectId(_id)) {
-    return res.status(400).json({ message: "Invalid post ID" });
+export const togglePostLike = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const userId = req.session.userID;
+
+  if (!mongoose.isValidObjectId(id)) {
+    throw new AppError('Invalid post ID', 400);
   }
 
-  try {
-    const post = await Post.findById(_id);
-    if (!post) {
-      return res.status(404).json({ error: "Post not found!" });
-    }
-    if (!text) {
-      return res.status(400).json({ error: "Message is required" });
-    }
-    if (!role || !userID || !user) {
-      return res.status(401).json({ error: "Unauthorized" });
-    }
-    post.comments.push({
-      _id: new mongoose.Types.ObjectId().toString(),
-      text: text.trim(),
-      author: user,
-      role,
-      userId: userID,
-      createdTime: new Date(),
-      editedAt: new Date(),
-    });
-    await post.save();
-    res.status(201).json(post);
-  } catch (err) {
-    console.log(err);
-    res.status(500).json({ message: "Internal server error!" });
-  }
-};
+  const post = await Post.findById(id);
 
-const getPostComment = async (req: Request, res: Response) => {
-  const { post } = req.params;
-  if (!mongoose.isValidObjectId(post)) {
-    return res.status(400).json({ message: "Invalid post ID" });
+  if (!post) {
+    throw new AppError('Post not found', 404);
   }
 
-  try {
-    const allComments = await Post.findById(post, {
-      comments: 1,
-    });
-    if (!allComments) {
-      return res.status(404).json({ error: "Post not found!" });
-    }
-    if (allComments.comments.length === 0) {
-      return res.status(404).json({ message: "No comments found!" });
-    }
-    res.status(200).json(allComments);
-  } catch (err) {
-    console.log(err);
-    res.status(500).json({ message: "Internal server error!" });
-  }
-};
+  const userObjectId = new mongoose.Types.ObjectId(userId);
+  const alreadyLiked = post.likedBy.some((likedId) => likedId.equals(userObjectId));
 
-const editPostComment = async (req: Request, res: Response) => {
+  if (alreadyLiked) {
+    post.likedBy = post.likedBy.filter((likedId) => !likedId.equals(userObjectId));
+    post.likes = Math.max(0, post.likes - 1);
+  } else {
+    post.likedBy.push(userObjectId);
+    post.likes += 1;
+  }
+
+  await post.save();
+
+  sendSuccess({
+    res,
+    message: alreadyLiked ? 'Post unliked' : 'Post liked',
+    data: {
+      likes: post.likes,
+      liked: !alreadyLiked,
+    },
+  });
+});
+
+export const createComment = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { text } = createCommentSchema.parse(req.body);
+
+  if (!mongoose.isValidObjectId(id)) {
+    throw new AppError('Invalid post ID', 400);
+  }
+
+  const post = await Post.findById(id);
+
+  if (!post) {
+    throw new AppError('Post not found', 404);
+  }
+
+  const comment = post.comments.create({
+    text,
+    author: req.session.user!,
+    role: req.session.role as 'user' | 'admin',
+    userId: new mongoose.Types.ObjectId(req.session.userID),
+    editedAt: new Date(),
+  });
+
+  await post.save();
+
+  sendSuccess({
+    res,
+    statusCode: 201,
+    message: 'Comment added',
+    data: comment,
+  });
+});
+
+export const getComments = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+
+  if (!mongoose.isValidObjectId(id)) {
+    throw new AppError('Invalid post ID', 400);
+  }
+
+  const post = await Post.findById(id, { comments: 1, title: 1 }).lean();
+
+  if (!post) {
+    throw new AppError('Post not found', 404);
+  }
+
+  sendSuccess({
+    res,
+    data: {
+      postId: post._id,
+      title: post.title,
+      comments: post.comments,
+    },
+  });
+});
+
+export const updateComment = asyncHandler(async (req: Request, res: Response) => {
   const { postId, commentId } = req.params;
-  const { text } = req.body;
-  if (!mongoose.isValidObjectId(postId)) {
-    return res.status(400).json({ message: "Invalid post ID" });
+  const { text } = updateCommentSchema.parse(req.body);
+
+  if (!mongoose.isValidObjectId(postId) || !mongoose.isValidObjectId(commentId)) {
+    throw new AppError('Invalid post or comment ID', 400);
   }
 
-  if (!text) {
-    return res.status(400).json({ message: "Comment text is required" });
+  const post = await Post.findById(postId);
+
+  if (!post) {
+    throw new AppError('Post not found', 404);
   }
 
-  try {
-    const post = await Post.findById(postId);
-    if (!post) {
-      return res.status(404).json({ message: "Post not found!" });
-    }
-    const comment = post.comments.find((c) => c._id == commentId);
-    if (!comment) {
-      return res.status(404).json({ message: "Comment not found!" });
-    }
-    if (req.session.userID == comment.userId) {
-      comment.text = text.trim();
-      comment.editedAt = new Date();
-      await post.save();
-      return res.status(200).json({ message: "Comment Updated" });
-    }
-    res.status(403).json({ message: "Forbidden" });
-  } catch (err) {
-    console.log(err);
-    res.status(500).json({ message: "Internal server error!" });
-  }
-};
+  const comment = post.comments.id(commentId);
 
-const deletePostComment = async (req: Request, res: Response) => {
+  if (!comment) {
+    throw new AppError('Comment not found', 404);
+  }
+
+  if (comment.userId.toString() !== req.session.userID) {
+    throw new AppError('You can only edit your own comments', 403);
+  }
+
+  comment.text = text;
+  comment.editedAt = new Date();
+  await post.save();
+
+  sendSuccess({
+    res,
+    message: 'Comment updated',
+    data: comment,
+  });
+});
+
+export const deleteComment = asyncHandler(async (req: Request, res: Response) => {
   const { postId, commentId } = req.params;
-  if (!mongoose.isValidObjectId(postId)) {
-    return res.status(400).json({ message: "Invalid post ID" });
+
+  if (!mongoose.isValidObjectId(postId) || !mongoose.isValidObjectId(commentId)) {
+    throw new AppError('Invalid post or comment ID', 400);
   }
 
-  try {
-    const post = await Post.findById(postId);
-    if (!post) {
-      return res.status(404).json({ message: "Post not found!" });
-    }
-    const comment = post.comments.find((c) => c._id == commentId);
-    if (!comment) {
-      return res.status(404).json({ message: "Comment not found!" });
-    }
-    if (req.session.userID == comment.userId || isAdmin(req)) {
-      post.comments = post.comments.filter((c) => c._id != commentId);
-      await post.save();
-      return res.status(200).json({ message: "Comment has been deleted" });
-    }
-    return res.status(403).json({ message: "Forbidden!" });
-  } catch (err) {
-    console.log(err);
-    res.status(500).json({ message: "Internal server error!" });
+  const post = await Post.findById(postId);
+
+  if (!post) {
+    throw new AppError('Post not found', 404);
   }
-};
 
-const notFound = (req: Request, res: Response) => {
-  res.status(404).json({ message: "404 Page/Path Not Found!" });
-};
+  const comment = post.comments.id(commentId);
 
-export {
-  getAllPost,
-  getOnePost,
-  createPost,
-  editPost,
-  deletePost,
-  likePost,
-  createPostComment,
-  getPostComment,
-  editPostComment,
-  deletePostComment,
-  notFound,
-};
+  if (!comment) {
+    throw new AppError('Comment not found', 404);
+  }
+
+  const isOwner = comment.userId.toString() === req.session.userID;
+  const isAdmin = req.session.role === 'admin';
+
+  if (!isOwner && !isAdmin) {
+    throw new AppError('You do not have permission to delete this comment', 403);
+  }
+
+  comment.deleteOne();
+  await post.save();
+
+  sendSuccess({ res, message: 'Comment deleted' });
+});
