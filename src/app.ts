@@ -1,48 +1,86 @@
-import { load } from 'dotenv-extended';
+import cors from 'cors';
 import express, { Request, Response } from 'express';
+import rateLimit from 'express-rate-limit';
+import helmet from 'helmet';
+import morgan from 'morgan';
 import session, { SessionOptions } from 'express-session';
-import usersRoute from './api/users.js'
-import postsRoute from './api/posts.js'
 import { resolve } from 'path';
-import { config } from 'dotenv';
-config();
+import { fileURLToPath } from 'url';
+import { env } from './config/env.js';
+import { errorHandler } from './middleware/errorHandler.js';
+import { notFound } from './middleware/notFound.js';
+import apiRouter from './routes/index.js';
+import { openApiSpec } from './docs/openapi.js';
 
-load();
+const __dirname = fileURLToPath(new URL('.', import.meta.url));
+const publicDir = resolve(__dirname, '../public');
 
-const sessionSecret = process.env.SESSION_SECRET;
-if (!sessionSecret) {
-    throw new Error('SESSION_SECRET is missing. Set it in your .env file.');
-}
+const oneDay = 1000 * 60 * 60 * 24;
 
-const app = express()
-
-const oneDay = 1000 * 60 * 60;
-const expSession: SessionOptions = {
-  secret: sessionSecret,
+const sessionConfig: SessionOptions = {
+  secret: env.SESSION_SECRET,
   resave: false,
-  saveUninitialized: true,
+  saveUninitialized: false,
+  name: 'blog.sid',
   cookie: {
-    maxAge: oneDay
-  }
-}
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: env.NODE_ENV === 'production',
+    maxAge: oneDay,
+  },
+};
 
-app.use(express.static('public'))
-app.use(session(expSession))
-app.use(express.urlencoded({ extended: true }))
-app.use(express.json())
+const app = express();
 
-app.get('/health', (req: Request, res: Response) => {
-    res.status(200).json({
-        status: 'ok',
-        database: req.app.locals.databaseStatus || 'unknown',
-    });
-})
+app.set('trust proxy', 1);
 
-app.get('/', (req: Request, res: Response) => {
-    res.sendFile(resolve('public', 'index.html'));
-})
+app.use(helmet({
+  contentSecurityPolicy: false,
+}));
+app.use(cors({
+  origin: env.CORS_ORIGIN ?? true,
+  credentials: true,
+}));
+app.use(morgan(env.NODE_ENV === 'production' ? 'combined' : 'dev'));
+app.use(rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    message: 'Too many requests. Please try again later.',
+  },
+}));
 
-app.use('/post', postsRoute)
-app.use('/user', usersRoute)
+app.use(express.static(publicDir));
+app.use(session(sessionConfig));
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+
+app.get('/health', (_req: Request, res: Response) => {
+  res.status(200).json({
+    success: true,
+    data: {
+      status: 'ok',
+      environment: env.NODE_ENV,
+      database: app.locals.databaseStatus ?? 'unknown',
+      timestamp: new Date().toISOString(),
+    },
+  });
+});
+
+app.get('/api/docs', (_req: Request, res: Response) => {
+  res.status(200).json(openApiSpec);
+});
+
+app.get('/', (_req: Request, res: Response) => {
+  res.sendFile(resolve(publicDir, 'index.html'));
+});
+
+app.use('/api/v1', apiRouter);
+
+app.use(notFound);
+app.use(errorHandler);
 
 export default app;
