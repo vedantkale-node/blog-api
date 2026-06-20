@@ -1,157 +1,198 @@
 # Blog API
 
-A session-authenticated REST API for a small publishing platform. It supports users, admin-only post management, comments, likes, view counts, and MongoDB persistence.
+A production-style, session-authenticated REST API for a small publishing platform. Built to demonstrate backend fundamentals that interviewers and portfolio reviewers look for: clear architecture, validation, authorization, security middleware, and predictable HTTP responses.
 
-This project is intentionally compact, but it now highlights the things a backend portfolio project should show: authentication, authorization, validation, clear setup, and predictable HTTP responses.
+## Highlights
+
+- Versioned REST API at `/api/v1`
+- Session-based authentication with bcrypt password hashing
+- Role-based access control (`user` / `admin`)
+- Zod request validation and centralized error handling
+- Security middleware: Helmet, CORS, rate limiting
+- Paginated post listing
+- Comments, likes, and view counts
+- OpenAPI-style docs at `/api/docs`
+- Health check endpoint for deployment monitoring
 
 ## Tech Stack
 
-- Node.js
-- Express
-- TypeScript
-- MongoDB with Mongoose
-- express-session
-- bcrypt
+| Layer | Choice |
+| --- | --- |
+| Runtime | Node.js 20+ |
+| Framework | Express 4 |
+| Language | TypeScript (strict) |
+| Database | MongoDB + Mongoose |
+| Auth | express-session + bcrypt |
+| Validation | Zod |
+| Security | Helmet, CORS, express-rate-limit |
 
-## Features
+## Architecture
 
-- User registration and login with hashed passwords
-- Session-based authentication
-- Role-based authorization for admin post management
-- Published post listing and individual post lookup
-- Post view counts
-- Like and unlike behavior per authenticated user
-- Comment creation, editing, and deletion
-- Owner/admin checks for protected mutations
-- Health check endpoint for deployment monitoring
+```text
+src/
+├── app.ts              # Express app setup and middleware
+├── server.ts           # Bootstrap and database connection
+├── config/             # Environment and database config
+├── controllers/        # Request handlers
+├── docs/               # OpenAPI specification
+├── interfaces/         # Domain types
+├── middleware/         # Auth, errors, async wrapper
+├── models/             # Mongoose schemas
+├── routes/             # Versioned route definitions
+├── utils/              # Shared helpers
+└── validators/         # Zod schemas
+```
 
 ## Getting Started
 
-Install dependencies:
+### 1. Install dependencies
 
 ```bash
-npm install
+pnpm install
 ```
 
-Create a `.env` file:
+### 2. Configure environment
 
-```env
-MONGO_URI=mongodb+srv://username:password@cluster.example.mongodb.net/blog-api
-SESSION_SECRET=replace-this-with-a-long-random-secret
-PORT=5000
-```
-
-Build and run:
+Copy the example file and update the values:
 
 ```bash
-npm run build
-npm start
+cp .env.example .env
 ```
 
-For local development, rebuild after TypeScript changes before running `npm start`.
-
-## Environment Variables
-
-| Name | Required | Description |
+| Variable | Required | Description |
 | --- | --- | --- |
-| `MONGO_URI` | Yes | MongoDB connection string. `MONGOURI` is also supported for backward compatibility. |
-| `SESSION_SECRET` | Yes | Secret used to sign session cookies. |
-| `PORT` | No | Server port. Defaults to `5000`. |
+| `MONGO_URI` | Yes | MongoDB connection string |
+| `SESSION_SECRET` | Yes | Secret for signing session cookies (min 32 chars) |
+| `PORT` | No | Server port. Defaults to `5000` |
+| `NODE_ENV` | No | `development`, `production`, or `test` |
+| `CORS_ORIGIN` | No | Allowed frontend origin. Defaults to permissive in dev |
 
-## Endpoints
+### 3. Run locally
 
-### System
+Development with hot reload:
 
-| Method | Route | Auth | Description |
-| --- | --- | --- | --- |
-| `GET` | `/health` | Public | Returns API health status. |
-| `GET` | `/` | Public | Serves the documentation landing page. |
+```bash
+pnpm dev
+```
+
+Production build:
+
+```bash
+pnpm build
+pnpm start
+```
+
+## API Overview
+
+Base URL: `/api/v1`
 
 ### Users
 
 | Method | Route | Auth | Description |
 | --- | --- | --- | --- |
-| `POST` | `/user` | Public | Register a user. |
-| `POST` | `/user/auth` | Public | Log in and create a session. |
-| `POST` | `/user/logout` | Session | Destroy the current session. |
-| `GET` | `/user` | Session | List public user profiles. |
-| `GET` | `/user/:id` | Session | Get one public user profile. |
-| `PUT` | `/user/:id` | Owner/Admin | Update first or last name. |
-| `DELETE` | `/user/:id` | Owner/Admin | Delete a user account. |
+| `POST` | `/users/register` | Public | Register a new user |
+| `POST` | `/users/login` | Public | Log in and create a session |
+| `POST` | `/users/logout` | Session | Destroy the current session |
+| `GET` | `/users/me` | Session | Get the authenticated user |
+| `GET` | `/users` | Session | List public user profiles |
+| `GET` | `/users/:id` | Session | Get one public profile |
+| `PATCH` | `/users/:id` | Owner/Admin | Update profile |
+| `DELETE` | `/users/:id` | Owner/Admin | Delete account |
 
 ### Posts
 
 | Method | Route | Auth | Description |
 | --- | --- | --- | --- |
-| `GET` | `/post` | Public | List published posts. |
-| `GET` | `/post/:post` | Public | Get one post and increment views. |
-| `POST` | `/post` | Admin | Create a post. |
-| `PUT` | `/post/:post` | Admin | Update a post. |
-| `DELETE` | `/post/:post` | Admin | Delete a post. |
-| `PUT` | `/post/:post/like` | Session | Like or unlike a post. |
-| `POST` | `/post/:post/comments` | Session | Add a comment. |
-| `GET` | `/post/:post/comments` | Session | Get comments for a post. |
-| `PUT` | `/post/:postId/:commentId` | Owner | Edit a comment. |
-| `DELETE` | `/post/:postId/:commentId` | Owner/Admin | Delete a comment. |
+| `GET` | `/posts` | Public | List published posts (paginated) |
+| `GET` | `/posts/:id` | Public | Get one post and increment views |
+| `POST` | `/posts` | Admin | Create a post |
+| `PATCH` | `/posts/:id` | Admin | Update a post |
+| `DELETE` | `/posts/:id` | Admin | Delete a post |
+| `PUT` | `/posts/:id/like` | Session | Toggle like |
+| `GET` | `/posts/:id/comments` | Public | List comments |
+| `POST` | `/posts/:id/comments` | Session | Add a comment |
+| `PATCH` | `/posts/:id/comments/:commentId` | Owner | Edit a comment |
+| `DELETE` | `/posts/:id/comments/:commentId` | Owner/Admin | Delete a comment |
+
+### System
+
+| Method | Route | Description |
+| --- | --- | --- |
+| `GET` | `/health` | Health check |
+| `GET` | `/api/docs` | OpenAPI specification |
+| `GET` | `/` | Documentation landing page |
+
+## Response Format
+
+Successful responses:
+
+```json
+{
+  "success": true,
+  "message": "Optional human-readable message",
+  "data": {}
+}
+```
+
+Error responses:
+
+```json
+{
+  "success": false,
+  "message": "What went wrong"
+}
+```
 
 ## Example Requests
 
 Register:
 
-```json
-{
-  "firstName": "Vedant",
-  "lastName": "Sharma",
-  "email": "vedant@example.com",
-  "username": "vedant",
-  "password": "strongpassword"
-}
+```bash
+curl -X POST http://localhost:5000/api/v1/users/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "firstName": "Vedant",
+    "lastName": "Sharma",
+    "email": "vedant@example.com",
+    "username": "vedant",
+    "password": "strongpassword"
+  }'
 ```
 
-Log in:
+Log in (save the session cookie):
 
-```json
-{
-  "username": "vedant",
-  "password": "strongpassword"
-}
+```bash
+curl -X POST http://localhost:5000/api/v1/users/login \
+  -H "Content-Type: application/json" \
+  -c cookies.txt \
+  -d '{
+    "username": "vedant",
+    "password": "strongpassword"
+  }'
 ```
 
-Create a post as an admin:
+List posts:
 
-```json
-{
-  "title": "Designing a Blog API",
-  "content": "A practical walkthrough of building a session-authenticated API.",
-  "tags": "node, express, mongodb"
-}
+```bash
+curl "http://localhost:5000/api/v1/posts?page=1&limit=10"
 ```
 
-Create a comment:
+## Portfolio Talking Points
 
-```json
-{
-  "text": "This was helpful."
-}
-```
+- **Layered architecture** keeps routing, validation, business logic, and persistence separate
+- **Defense in depth** with validation, auth middleware, rate limits, and sanitized errors
+- **Password security** via bcrypt pre-save hooks and `select: false` on password fields
+- **Consistent API contract** makes the project easy to demo with Postman or a frontend
+- **Operational readiness** with health checks, structured logging, and environment validation
 
-## Response Codes
+## Deployment Notes
 
-- `200` successful read, update, delete, login, or like action
-- `201` successful creation
-- `400` invalid or missing request data
-- `401` authentication required
-- `403` authenticated but not allowed
-- `404` resource not found
-- `409` duplicate user credentials
-- `500` unexpected server error
+- Set `NODE_ENV=production`
+- Use a strong `SESSION_SECRET`
+- Point `MONGO_URI` to a managed MongoDB instance (Atlas, etc.)
+- Set `CORS_ORIGIN` to your frontend domain
+- For multi-instance deployments, replace the default memory session store with Redis
 
-## Portfolio Notes
+## License
 
-This project is best presented as a focused backend API. Strong talking points include:
-
-- Fixing authorization bugs and enforcing role checks
-- Moving database startup into the server bootstrap flow
-- Adding validation before database operations
-- Avoiding password/email leakage in public user responses
-- Keeping the codebase small enough to explain clearly in an interview
+MIT
