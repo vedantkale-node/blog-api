@@ -1,225 +1,192 @@
-import bcrypt from 'bcrypt';
-import User from '../models/Users.js';
-import mongoose from 'mongoose';
 import { Request, Response } from 'express';
+import mongoose from 'mongoose';
+import User from '../models/Users.js';
+import { asyncHandler } from '../middleware/asyncHandler.js';
+import { AppError } from '../utils/AppError.js';
+import { sendSuccess } from '../utils/apiResponse.js';
+import {
+  loginUserSchema,
+  registerUserSchema,
+  updateUserSchema,
+} from '../validators/user.validator.js';
 
-const publicUserFields = {
-  loginAttempts: 0,
-  password: 0,
-  createdAt: 0,
-  updatedAt: 0,
-  role: 0,
-  email: 0,
-  __v: 0,
+const publicUserProjection = {
+  firstName: 1,
+  lastName: 1,
+  username: 1,
 };
 
-const getUserControl = async (req: Request, res: Response) => {
-  try {
-    const allUsers = await User.find(
-      {},
-      {
-        ...publicUserFields,
-      }
-    );
-    if (allUsers.length === 0) {
-      return res.status(404).json({ message: "No users found!" });
-    }
-    res.json(allUsers);
-  } catch (err) {
-    console.log(err.message);
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
+export const getUsers = asyncHandler(async (_req: Request, res: Response) => {
+  const users = await User.find({}, publicUserProjection).lean();
 
-const createUserControl = async (req: Request, res: Response) => {
-  const { firstName, lastName, email, password, username } = req.body;
-
-  if (!firstName || !lastName || !email || !password || !username) {
-    return res.status(400).json({ message: "firstName, lastName, email, username and password are required" });
+  if (users.length === 0) {
+    throw new AppError('No users found', 404);
   }
 
-  if (password.length < 8 || password.length > 128) {
-    return res.status(400).json({ message: "Password must be between 8 and 128 characters" });
-  }
+  sendSuccess({ res, data: users });
+});
 
-  const newUser = new User({
-    firstName: firstName.trim(),
-    lastName: lastName.trim(),
-    username: username.trim(),
-    email: email.trim().toLowerCase(),
-    password,
+export const registerUser = asyncHandler(async (req: Request, res: Response) => {
+  const payload = registerUserSchema.parse(req.body);
+
+  const user = await User.create(payload);
+
+  sendSuccess({
+    res,
+    statusCode: 201,
+    message: `User ${user.username} has been created`,
+    data: {
+      id: user._id,
+      username: user.username,
+    },
   });
-  try {
-    const hashedPassword = await bcrypt.hash(password, 10);
-    newUser.password = hashedPassword;
-    await newUser.save();
-    res
-      .status(201)
-      .json({ message: `User ${newUser.username} has been created.` });
-  } catch (err) {
-    if (err.code === 11000) {
-      return res.status(409).json({ message: "Email or username already exists" });
-    }
-    console.log(err.message);
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
+});
 
-const getOneUserControl = async (req: Request, res: Response) => {
-  const { id } = req.params;
-  if (!mongoose.isValidObjectId(id)) {
-    return res.status(400).json({ message: "Invalid user ID" });
-  }
-
-  try {
-    const oneUser = await User.findOne(
-      { _id: id },
-      {
-        ...publicUserFields,
-      }
-    );
-    if (!oneUser) {
-      return res.status(404).json({ message: "User not found!" });
-    }
-    res.status(200).json(oneUser);
-  } catch (err) {
-    console.log(err.message);
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
-
-const editUserControl = async (req: Request, res: Response) => {
-  const { firstName, lastName } = req.body;
+export const getUserById = asyncHandler(async (req: Request, res: Response) => {
   const { id } = req.params;
 
   if (!mongoose.isValidObjectId(id)) {
-    return res.status(400).json({ message: "Invalid user ID" });
+    throw new AppError('Invalid user ID', 400);
   }
 
-  if (req.session.role !== "admin" && req.session.userID != id) {
-    return res.status(403).json({ message: "Forbidden!" });
+  const user = await User.findById(id, publicUserProjection).lean();
+
+  if (!user) {
+    throw new AppError('User not found', 404);
   }
 
-  if (!firstName && !lastName) {
-    return res.status(400).json({ message: "Provide firstName or lastName to update" });
-  }
+  sendSuccess({ res, data: user });
+});
 
-  const updates: { firstName?: string; lastName?: string; updatedAt: Date } = {
-    updatedAt: new Date(),
-  };
-
-  if (firstName) {
-    updates.firstName = firstName.trim();
-  }
-
-  if (lastName) {
-    updates.lastName = lastName.trim();
-  }
-
-  try {
-    const updateOneUser = await User.findByIdAndUpdate(id, updates);
-    if (!updateOneUser) {
-      return res.status(404).json({ message: "User not found!" });
-    }
-    res
-      .status(200)
-      .json({ message: `Changes has been made to the user ${id}` });
-  } catch (err) {
-    console.log(err.message);
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
-
-const deleteUserControl = async (req: Request, res: Response) => {
+export const updateUser = asyncHandler(async (req: Request, res: Response) => {
   const { id } = req.params;
+  const updates = updateUserSchema.parse(req.body);
+
   if (!mongoose.isValidObjectId(id)) {
-    return res.status(400).json({ message: "Invalid user ID" });
+    throw new AppError('Invalid user ID', 400);
   }
 
-  try {
-    if (req.session.role === "admin" || req.session.userID == id) {
-      const deletedUser = await User.findByIdAndDelete(id);
-      if (!deletedUser) {
-        return res.status(404).json({ message: "User not found!" });
-      }
+  if (req.session.role !== 'admin' && req.session.userID !== id) {
+    throw new AppError('You do not have permission to update this user', 403);
+  }
+
+  const user = await User.findByIdAndUpdate(id, updates, {
+    new: true,
+    runValidators: true,
+    projection: publicUserProjection,
+  }).lean();
+
+  if (!user) {
+    throw new AppError('User not found', 404);
+  }
+
+  sendSuccess({
+    res,
+    message: 'User updated successfully',
+    data: user,
+  });
+});
+
+export const deleteUser = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+
+  if (!mongoose.isValidObjectId(id)) {
+    throw new AppError('Invalid user ID', 400);
+  }
+
+  if (req.session.role !== 'admin' && req.session.userID !== id) {
+    throw new AppError('You do not have permission to delete this user', 403);
+  }
+
+  const deletedUser = await User.findByIdAndDelete(id);
+
+  if (!deletedUser) {
+    throw new AppError('User not found', 404);
+  }
+
+  if (req.session.userID === id) {
+    return new Promise<void>((resolve, reject) => {
       req.session.destroy((err) => {
         if (err) {
-          console.log('unable to log out');          
-          console.error(err);          
+          reject(new AppError('User deleted, but logout failed', 500));
+          return;
         }
+        sendSuccess({ res, message: 'User deleted and session cleared' });
+        resolve();
       });
-      return res
-        .status(200)
-        .json({ message: `User ${id} has been successfully deleted` });
-    }
-    return res.status(403).json({ message: "403! Forbidden!" });
-  } catch (err) {
-    console.log(err.message);
-    res.status(500).json({ message: "Internal server error" });
+    });
   }
-};
 
-const auth = async (req: Request, res: Response) => {
-  const { username, password } = req.body;
-  try {
-    if (username && password) {
-      const findUser = await User.findOne({ username: username.trim() });
-      if (!findUser) {
-        return res
-          .status(400)
-          .json({ message: "Invalid Username or Password" });
-      }
-      if (findUser.loginAttempts >= 10) {
-        return res.status(400).json({
-          message:
-            "Account Locked, Max attempts reached, go to /help for more info",
-        });
-      }
-      const comparePass = await bcrypt.compare(password, findUser.password);
-      if (!comparePass) {
-        findUser.loginAttempts += 1;
-        await findUser.save();
-        return res.status(400).json({ message: "Wrong username or password!" });
-      }
-      req.session.userID = findUser._id.toString();
-      req.session.role = findUser.role;
-      req.session.user = findUser.username;
-      req.session.fullName = findUser.firstName + " " + findUser.lastName;
-      findUser.loginAttempts = 0;
-      await findUser.save();
-      return res
-        .status(200)
-        .json({ message: `Logged in successfully. Hello ${findUser.username}` });
-    } else {
-      res.status(400).json({ message: "Username and password are required" });
-    }
-  } catch (err) {
-    console.log(err.message);
-    res.status(500).json({ message: "Internal server error" });
+  sendSuccess({ res, message: 'User deleted successfully' });
+});
+
+export const loginUser = asyncHandler(async (req: Request, res: Response) => {
+  const { username, password } = loginUserSchema.parse(req.body);
+
+  const user = await User.findOne({ username }).select('+password');
+
+  if (!user) {
+    throw new AppError('Invalid username or password', 401);
   }
-};
 
-const logout = (req: Request, res: Response) => {
-  req.session.destroy((err) => {
-    if (err) {
-      console.log('unable to log out');          
-      console.error(err);          
-    }
+  if (user.loginAttempts >= 10) {
+    throw new AppError(
+      'Account locked after too many failed attempts. Contact support.',
+      423
+    );
+  }
+
+  const isValidPassword = await user.comparePassword(password);
+
+  if (!isValidPassword) {
+    user.loginAttempts += 1;
+    await user.save();
+    throw new AppError('Invalid username or password', 401);
+  }
+
+  user.loginAttempts = 0;
+  await user.save();
+
+  req.session.userID = user._id.toString();
+  req.session.role = user.role;
+  req.session.user = user.username;
+  req.session.fullName = `${user.firstName} ${user.lastName}`;
+
+  sendSuccess({
+    res,
+    message: `Logged in successfully. Hello ${user.username}`,
+    data: {
+      username: user.username,
+      role: user.role,
+    },
   });
-  res.redirect("/");
-};
+});
 
-const notFound = (req: Request, res: Response) => {
-  res.status(404).json({ message: "404 Page/Path Not Found!" });
-};
+export const logoutUser = asyncHandler(async (req: Request, res: Response) => {
+  return new Promise<void>((resolve, reject) => {
+    req.session.destroy((err) => {
+      if (err) {
+        reject(new AppError('Unable to log out', 500));
+        return;
+      }
+      sendSuccess({ res, message: 'Logged out successfully' });
+      resolve();
+    });
+  });
+});
 
-export {
-  getUserControl,
-  createUserControl,
-  getOneUserControl,
-  editUserControl,
-  deleteUserControl,
-  auth,
-  logout,
-  notFound,
-};
+export const getCurrentUser = asyncHandler(async (req: Request, res: Response) => {
+  const user = await User.findById(req.session.userID, publicUserProjection).lean();
+
+  if (!user) {
+    throw new AppError('User not found', 404);
+  }
+
+  sendSuccess({
+    res,
+    data: {
+      ...user,
+      role: req.session.role,
+    },
+  });
+});
